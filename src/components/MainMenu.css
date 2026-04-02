@@ -1,0 +1,121 @@
+.main-menu {
+  width: 100%;
+  max-width: 420px;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60px 20px 40px;
+  gap: 48px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Hero */
+.mm-hero {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.mm-icon {
+  font-size: 4rem;
+  filter: drop-shadow(0 6px 18px rgba(167, 139, 250, 0.5));
+  animation: mm-float 3s ease-in-out infinite;
+}
+@keyframes mm-float {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-10px) rotate(3deg); }
+}
+.mm-title {
+  font-size: 3rem;
+  font-weight: 900;
+  background: linear-gradient(135deg, #a78bfa 0%, #60a5fa 40%, #34d399 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: mm-shimmer 4s ease-in-out infinite;
+  letter-spacing: -1.5px;
+}
+@keyframes mm-shimmer {
+  0%, 100% { background-position: 0% center; }
+  50% { background-position: 200% center; }
+}
+
+/* Nav */
+.mm-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 280px;
+}
+
+/* Buttons */
+.mm-btn {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f0f0f0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: transform 200ms, box-shadow 200ms, border-color 200ms;
+}
+.mm-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 200ms;
+}
+.mm-btn:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+.mm-btn:active {
+  transform: scale(0.97);
+}
+
+/* Play button — accent green */
+.mm-btn--play {
+  border-color: rgba(74, 222, 128, 0.3);
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.12), rgba(52, 211, 153, 0.05));
+}
+.mm-btn--play:hover {
+  border-color: rgba(74, 222, 128, 0.5);
+  box-shadow: 0 0 24px rgba(74, 222, 128, 0.2), 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* Settings */
+.mm-btn--settings:hover {
+  border-color: rgba(167, 139, 250, 0.4);
+  box-shadow: 0 0 24px rgba(167, 139, 250, 0.15), 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* Leaderboard */
+.mm-btn--leaderboard:hover {
+  border-color: rgba(251, 191, 36, 0.4);
+  box-shadow: 0 0 24px rgba(251, 191, 36, 0.15), 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+
+.mm-btn__icon {
+  font-size: 1.5rem;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 36px;
+  text-align: center;
+}
+.mm-btn__label {
+  flex: 1;
+  text-align: left;
+}

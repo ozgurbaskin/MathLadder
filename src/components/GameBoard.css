@@ -7,6 +7,8 @@
   flex-direction: column;
   padding: 12px 16px 16px;
   gap: 0;
+  position: relative;
+  z-index: 1;
 }
 
 /* ===== Header ===== */
@@ -252,6 +254,8 @@
 /* ===== Question Area ===== */
 .gb-question {
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
@@ -285,6 +289,51 @@
   font-weight: 600;
   color: #f87171;
   animation: fadeIn 200ms ease;
+}
+.gb-question__revealed {
+  margin-top: 8px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: 0.4em;
+  color: #60a5fa;
+  text-align: center;
+  font-family: monospace;
+  animation: fadeIn 250ms ease;
+}
+/* Action buttons row (Hint + Reveal side-by-side) */
+.gb-question__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.gb-action-btn {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(240, 240, 240, 0.7);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 200ms, border-color 200ms, color 200ms;
+}
+.gb-action-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.gb-action-btn--active {
+  background: rgba(251, 191, 36, 0.15);
+  border-color: rgba(251, 191, 36, 0.3);
+  color: #fbbf24;
+}
+.gb-action-btn--reveal.gb-action-btn--active {
+  background: rgba(96, 165, 250, 0.15);
+  border-color: rgba(96, 165, 250, 0.3);
+  color: #93c5fd;
+}
+.gb-action-btn--cooldown {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* ===== Status Messages ===== */

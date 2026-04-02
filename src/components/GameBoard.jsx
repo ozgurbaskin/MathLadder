@@ -1,4 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { useSettings } from '../SettingsContext.jsx';
+import { t } from '../i18n.js';
+import { playTap, playCorrect, playWrong, playWin, playDrag, playUnlock } from '../sounds.js';
 import './GameBoard.css';
 
 /*
@@ -52,6 +55,9 @@ function shuffleArray(arr) {
 }
 
 export default function GameBoard({ level, onComplete, onBack }) {
+  const { settings } = useSettings();
+  const lang = settings.language;
+  const sfx = settings.sound;
   const { digits } = level;
 
   // rungOrder: indices into level.steps for rungs 1–5 (shuffled, reorderable)
@@ -63,28 +69,44 @@ export default function GameBoard({ level, onComplete, onBack }) {
   const [bonusBottomAnswer, setBonusBottomAnswer] = useState(null);
 
   // Dynamic bonus assignment: which level bonus goes where
-  // Determined when bonus unlocks based on user's ordering direction
-  // { top: level.bonusTop|bonusBottom, bottom: level.bonusTop|bonusBottom }
+  // Test which pairing actually chains (1-digit diff) with the endpoints
   const bonusAssignment = useMemo(() => {
     if (!mainAnswers.every((a) => a !== null)) return { top: level.bonusTop, bottom: level.bonusBottom };
-    const firstAnswer = mainAnswers[0];
-    const lastAnswer = mainAnswers[4];
-    // If user ordered ascending (top < bottom) → bonusTop goes top, bonusBottom goes bottom
-    // If descending (top > bottom) → swap: bonusBottom goes top, bonusTop goes bottom
-    if (firstAnswer <= lastAnswer) {
-      return { top: level.bonusTop, bottom: level.bonusBottom };
-    } else {
-      return { top: level.bonusBottom, bottom: level.bonusTop };
+    const first = mainAnswers[0];
+    const last = mainAnswers[4];
+    const bT = level.bonusTop;
+    const bB = level.bonusBottom;
+    // Try default: bonusTop→first, bonusBottom→last
+    if (countDiffDigits(bT.answer, first, digits) === 1 && countDiffDigits(bB.answer, last, digits) === 1) {
+      return { top: bT, bottom: bB };
     }
-  }, [mainAnswers, level.bonusTop, level.bonusBottom]);
+    // Try swapped: bonusBottom→first, bonusTop→last
+    if (countDiffDigits(bB.answer, first, digits) === 1 && countDiffDigits(bT.answer, last, digits) === 1) {
+      return { top: bB, bottom: bT };
+    }
+    // Fallback
+    return { top: bT, bottom: bB };
+  }, [mainAnswers, level.bonusTop, level.bonusBottom, digits]);
 
   // Which rung is selected: -1 = none, 0–4 = main, 5 = bonusTop, 6 = bonusBottom
-  const [selectedRung, setSelectedRung] = useState(-1);
+  // Auto-select first empty main rung on init
+  const [selectedRung, setSelectedRung] = useState(0);
   const [inputValue, setInputValue] = useState('');
   const [status, setStatus] = useState('idle'); // 'idle' | 'correct' | 'wrong'
-  const [showHint, setShowHint] = useState(false);
   const [timer, setTimer] = useState(0);
   const [finished, setFinished] = useState(false);
+
+  // Hint & Reveal toggles per rung
+  const [showHint, setShowHint] = useState(false);
+  const [revealedRungs, setRevealedRungs] = useState(new Set()); // rung keys that have been revealed
+  const [revealCooldown, setRevealCooldown] = useState(0); // seconds remaining
+
+  // Cooldown timer
+  useEffect(() => {
+    if (revealCooldown <= 0) return;
+    const id = setInterval(() => setRevealCooldown((v) => Math.max(0, v - 1)), 1000);
+    return () => clearInterval(id);
+  }, [revealCooldown > 0]);
 
   // Drag state
   const [dragIdx, setDragIdx] = useState(null);
@@ -110,6 +132,14 @@ export default function GameBoard({ level, onComplete, onBack }) {
   const mainAllUnique = useMemo(() => allUnique(mainAnswers), [mainAnswers]);
 
   const bonusUnlocked = mainAllFilled && mainChainValid && mainAllUnique;
+
+  // Play unlock sound when bonus first unlocks
+  const prevBonusUnlocked = useRef(false);
+  useEffect(() => {
+    if (bonusUnlocked && !prevBonusUnlocked.current && sfx) playUnlock();
+    prevBonusUnlocked.current = bonusUnlocked;
+  }, [bonusUnlocked, sfx]);
+
   const allDone = bonusUnlocked && bonusTopAnswer !== null && bonusBottomAnswer !== null;
 
   // Check full chain for completion
@@ -142,10 +172,11 @@ export default function GameBoard({ level, onComplete, onBack }) {
   // Check for game completion
   useEffect(() => {
     if (fullChainValid && !finished) {
+      if (sfx) playWin();
       setFinished(true);
       setSelectedRung(-1);
     }
-  }, [fullChainValid, finished]);
+  }, [fullChainValid, finished, sfx]);
 
   // Get the question for the selected rung
   function getSelectedQuestion() {
@@ -191,6 +222,7 @@ export default function GameBoard({ level, onComplete, onBack }) {
   function handleNumpadPress(digit) {
     if (finished || selectedRung === -1 || !currentQuestion) return;
     if (inputValue.length >= digits) return;
+    if (sfx) playTap();
 
     const newValue = inputValue + digit;
     setInputValue(newValue);
@@ -200,8 +232,8 @@ export default function GameBoard({ level, onComplete, onBack }) {
       const parsed = parseInt(newValue, 10);
       if (parsed === currentQuestion.answer) {
         // Correct!
+        if (sfx) playCorrect();
         setStatus('correct');
-        setShowHint(false);
 
         if (selectedRung >= 0 && selectedRung <= 4) {
           const newAnswers = [...mainAnswers];
@@ -243,6 +275,7 @@ export default function GameBoard({ level, onComplete, onBack }) {
         }, 500);
       } else {
         // Wrong
+        if (sfx) playWrong();
         setStatus('wrong');
         setTimeout(() => {
           setInputValue('');
@@ -284,6 +317,7 @@ export default function GameBoard({ level, onComplete, onBack }) {
     newAnswers[mainIdx] = tmpA;
     setRungOrder(newOrder);
     setMainAnswers(newAnswers);
+    if (sfx) playDrag();
     // Adjust selectedRung if needed
     if (selectedRung === dragIdx) setSelectedRung(mainIdx);
     else if (selectedRung === mainIdx) setSelectedRung(dragIdx);
@@ -341,9 +375,19 @@ export default function GameBoard({ level, onComplete, onBack }) {
     setSelectedRung(-1);
     setInputValue('');
     setStatus('idle');
-    setShowHint(false);
     setTimer(0);
     setFinished(false);
+    setShowHint(false);
+    setRevealedRungs(new Set());
+    setRevealCooldown(0);
+  }
+
+  // Reveal ALL digits of the current answer (15s cooldown)
+  function handleRevealDigit() {
+    if (!currentQuestion || revealCooldown > 0 || finished) return;
+    const rungKey = String(selectedRung);
+    setRevealedRungs((prev) => new Set(prev).add(rungKey));
+    setRevealCooldown(15);
   }
 
   // Error indicators for chain validation
@@ -366,9 +410,9 @@ export default function GameBoard({ level, onComplete, onBack }) {
       <div className="gb-container">
         <div className="gb-win">
           <div className="gb-win__fireworks">🏆</div>
-          <h2>Tebrikler!</h2>
+          <h2>{t(lang, 'congrats')}</h2>
           <p>
-            <strong>{level.title}</strong> bölümünü {timerStr} sürede tamamladın!
+            {t(lang, 'completedIn', level.title[lang] || level.title.en, timerStr)}
           </p>
           <div className="gb-win__ladder-final">
             {fullAnswers.map((ans, i) => (
@@ -379,10 +423,10 @@ export default function GameBoard({ level, onComplete, onBack }) {
           </div>
           <div className="gb-win__actions">
             <button className="btn btn--primary" onClick={onComplete}>
-              🏠 Ana Menü
+              🏠 {t(lang, 'mainMenu')}
             </button>
             <button className="btn btn--ghost" onClick={handleReset}>
-              🔄 Tekrar Oyna
+              🔄 {t(lang, 'playAgain')}
             </button>
           </div>
         </div>
@@ -434,14 +478,7 @@ export default function GameBoard({ level, onComplete, onBack }) {
             <span className="gb-timer">⏱ {timerStr}</span>
           </div>
           <div className="gb-header__right">
-            <button
-              className="gb-header-btn"
-              onClick={() => setShowHint((v) => !v)}
-              title="İpucu"
-            >
-              İpucu
-            </button>
-            <button className="gb-header-btn gb-header-btn--icon" onClick={handleReset} title="Yeniden">
+            <button className="gb-header-btn gb-header-btn--icon" onClick={handleReset} title={t(lang, 'reset')}>
               ⟳
             </button>
           </div>
@@ -513,11 +550,23 @@ export default function GameBoard({ level, onComplete, onBack }) {
                   )}
                 </div>
 
-                {/* Right side = sign for main rungs */}
+                {/* Right side drag handle for main rungs */}
                 {!isBonus ? (
-                  <div className="gb-rung__eq">=</div>
+                  <div
+                    className="gb-rung__handle"
+                    draggable
+                    onDragStart={() => handleDragStart(rung.mainIdx)}
+                    onDragOver={(e) => handleDragOver(e, rung.mainIdx)}
+                    onDrop={() => handleDrop(rung.mainIdx)}
+                    onDragEnd={handleDragEnd}
+                    onTouchStart={(e) => handleTouchStart(e, rung.mainIdx)}
+                    onTouchEnd={(e) => handleTouchEnd(e, rung.mainIdx)}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    ☰
+                  </div>
                 ) : (
-                  <div className="gb-rung__eq-spacer" />
+                  <div className="gb-rung__handle-spacer" />
                 )}
               </div>
             </div>
@@ -528,12 +577,37 @@ export default function GameBoard({ level, onComplete, onBack }) {
       {/* Question Area */}
       {currentQuestion && selectedRung !== -1 && (
         <div className={`gb-question ${status === 'wrong' ? 'gb-question--wrong' : ''}`}>
-          <p className="gb-question__text">{currentQuestion.question}</p>
+          <p className="gb-question__text">{currentQuestion.question[lang] || currentQuestion.question.en}</p>
+          {/* Hint & Reveal buttons side-by-side */}
+          <div className="gb-question__actions">
+            <button
+              className={`gb-action-btn ${showHint ? 'gb-action-btn--active' : ''}`}
+              onClick={() => setShowHint((v) => !v)}
+            >
+              💡 {t(lang, 'hint')}
+            </button>
+            <button
+              className={`gb-action-btn gb-action-btn--reveal ${revealCooldown > 0 ? 'gb-action-btn--cooldown' : ''} ${revealedRungs.has(String(selectedRung)) ? 'gb-action-btn--active' : ''}`}
+              onClick={handleRevealDigit}
+              disabled={revealCooldown > 0 && !revealedRungs.has(String(selectedRung))}
+            >
+              {revealCooldown > 0 && !revealedRungs.has(String(selectedRung))
+                ? `🔒 ${revealCooldown}s`
+                : `🔎 ${t(lang, 'revealDigit')}`}
+            </button>
+          </div>
+          {/* Conditional hint text */}
           {showHint && currentQuestion.hint && (
-            <div className="gb-question__hint">💡 {currentQuestion.hint}</div>
+            <div className="gb-question__hint">{currentQuestion.hint[lang] || currentQuestion.hint.en}</div>
+          )}
+          {/* Revealed answer display */}
+          {revealedRungs.has(String(selectedRung)) && (
+            <div className="gb-question__revealed">
+              {String(currentQuestion.answer).padStart(digits, '0').split('').join(' ')}
+            </div>
           )}
           {status === 'wrong' && (
-            <div className="gb-question__error">Yanlış cevap, tekrar dene!</div>
+            <div className="gb-question__error">{t(lang, 'wrongAnswer')}</div>
           )}
         </div>
       )}
@@ -541,14 +615,14 @@ export default function GameBoard({ level, onComplete, onBack }) {
       {/* Status message when main phase done but chain invalid */}
       {mainAllFilled && !mainChainValid && selectedRung === -1 && (
         <div className="gb-status-msg gb-status-msg--warn">
-          ⚠ Sıralama hatalı! Her ardışık basamak yalnızca <strong>1 rakam</strong> farklı olmalı. Sürükleyerek sırayı değiştir.
+          ⚠ {t(lang, 'chainWarning')}
         </div>
       )}
 
       {/* Status message when bonus unlocked */}
       {bonusUnlocked && (bonusTopAnswer === null || bonusBottomAnswer === null) && selectedRung === -1 && (
         <div className="gb-status-msg gb-status-msg--info">
-          🔓 Bonus basamaklar açıldı! Üstteki veya alttaki kilit açılmış basamağa tıkla.
+          🔓 {t(lang, 'bonusUnlocked')}
         </div>
       )}
 

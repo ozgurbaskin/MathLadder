@@ -1,0 +1,116 @@
+.leaderboard {
+  width: 100%;
+  max-width: 420px;
+  padding: 32px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  position: relative;
+  z-index: 1;
+}
+
+.lb-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.lb-header h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+.lb-back {
+  width: 40px; height: 40px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+  color: #f0f0f0;
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 200ms, border-color 200ms;
+}
+.lb-back:hover {
+  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.25);
+}
+
+.lb-empty {
+  text-align: center;
+  color: rgba(240,240,240,0.4);
+  font-size: 1rem;
+  padding: 32px 0;
+}
+
+.lb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lb-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  transition: transform 200ms;
+}
+.lb-card--has-score {
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.lb-card__icon {
+  flex-shrink: 0;
+  width: 44px; height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 20%, rgba(0,0,0,0.2)), rgba(255,255,255,0.05));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem;
+}
+
+.lb-card__info {
+  flex: 1;
+  min-width: 0;
+}
+.lb-card__title {
+  display: block;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #f0f0f0;
+  margin-bottom: 2px;
+}
+.lb-card__stars {
+  display: flex;
+  gap: 2px;
+  font-size: 0.85rem;
+}
+.star--filled { color: #fbbf24; text-shadow: 0 0 6px rgba(251,191,36,0.5); }
+.star--empty { color: rgba(255,255,255,0.15); }
+
+.lb-card__score {
+  flex-shrink: 0;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.lb-card__time {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--accent, #a78bfa);
+  font-variant-numeric: tabular-nums;
+}
+.lb-card__label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: rgba(240,240,240,0.4);
+  letter-spacing: 0.06em;
+}
+.lb-card__dash {
+  font-size: 1.2rem;
+  color: rgba(240,240,240,0.2);
+}
