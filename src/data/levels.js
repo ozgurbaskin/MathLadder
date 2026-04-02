@@ -6,6 +6,7 @@ export const levels = [
     description: 'Her adımda sadece bir basamak değişiyor. Sıfırdan dokuza tırmanalım!',
     digits: 4,
     color: '#4ade80',
+    // 5 main questions (middle rungs)
     steps: [
       {
         question: '10 × 10 × 10 = ?',
@@ -33,6 +34,17 @@ export const levels = [
         hint: 'Tüm basamaklar 9',
       },
     ],
+    // 2 bonus questions: one goes top, one goes bottom
+    bonusTop: {
+      question: '500 × 2 + 100 = ?',
+      answer: 1100,
+      hint: 'Bin yüz',
+    },
+    bonusBottom: {
+      question: '10000 − 11 = ?',
+      answer: 9989,
+      hint: 'Dokuz bin dokuz yüz seksen dokuz',
+    },
   },
   {
     id: 2,
@@ -68,6 +80,16 @@ export const levels = [
         hint: 'Soğuk Savaş\'ın sembolik sonu',
       },
     ],
+    bonusTop: {
+      question: 'Osmanlı Devleti\'nin kuruluş yılı',
+      answer: 1299,
+      hint: 'Osman Bey tarafından kuruldu',
+    },
+    bonusBottom: {
+      question: 'Cumhuriyet\'in ilan yılı',
+      answer: 1923,
+      hint: 'Mustafa Kemal Atatürk',
+    },
   },
   {
     id: 3,
@@ -103,5 +125,15 @@ export const levels = [
         hint: 'İletişim tarihinin dönüm noktası',
       },
     ],
+    bonusTop: {
+      question: '4000 + 90 + 6 − 100 = ?',
+      answer: 3996,
+      hint: 'Üç bin dokuz yüz doksan altı',
+    },
+    bonusBottom: {
+      question: '1900 − 24 = ?',
+      answer: 1976,
+      hint: 'Bin dokuz yüz yetmiş altı',
+    },
   },
 ];

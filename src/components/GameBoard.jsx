@@ -1,82 +1,364 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import './GameBoard.css';
 
-/** Returns the index of the single differing digit, or -1 if not exactly one differs */
-function diffDigitIndex(a, b, digits) {
+/*
+  NEW GAME FLOW:
+  - 7 rungs on the ladder displayed vertically
+  - Rungs 1–5 = main questions (user clicks any to select & answer)
+  - Rung 0 = bonus top, Rung 6 = bonus bottom (locked until main 5 solved + ordered)
+  - User types answer via numpad; no submit button — auto-checks when all digits filled
+  - Selected digit position is highlighted (no blinking cursor)
+  - Rungs 1–5 can be drag-reordered via the "=" handles on the left
+  - Validation: consecutive answered rungs must differ by exactly 1 digit, all 7 unique
+  - Once main 5 are correct + form valid chain → bonus rungs unlock
+  - Bonus placement: bonusTop goes to rung 0 (above first), bonusBottom goes to rung 6 (below last)
+*/
+
+/** Count how many digit positions differ between two numbers */
+function countDiffDigits(a, b, digits) {
   const sa = String(a).padStart(digits, '0');
   const sb = String(b).padStart(digits, '0');
-  let diffIdx = -1;
   let count = 0;
   for (let i = 0; i < digits; i++) {
-    if (sa[i] !== sb[i]) { count++; diffIdx = i; }
+    if (sa[i] !== sb[i]) count++;
   }
-  return count === 1 ? diffIdx : -1;
+  return count;
+}
+
+/** Check if the answered rungs form a valid chain (each consecutive pair differs by exactly 1 digit) */
+function isValidChain(answers, digits) {
+  const filled = answers.filter((a) => a !== null);
+  if (filled.length < 2) return true;
+  for (let i = 0; i < filled.length - 1; i++) {
+    if (countDiffDigits(filled[i], filled[i + 1], digits) !== 1) return false;
+  }
+  return true;
+}
+
+/** Check all values are unique */
+function allUnique(answers) {
+  const filled = answers.filter((a) => a !== null);
+  return new Set(filled).size === filled.length;
+}
+
+/** Shuffle an array (Fisher-Yates) */
+function shuffleArray(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
 
 export default function GameBoard({ level, onComplete, onBack }) {
-  const [stepIndex, setStepIndex] = useState(0);
-  const [inputValue, setInputValue] = useState('');
-  const [answers, setAnswers] = useState([]);
-  const [status, setStatus] = useState('idle'); // 'idle' | 'correct' | 'wrong'
-  const [showHint, setShowHint] = useState(false);
-  const [finished, setFinished] = useState(false);
-  const inputRef = useRef(null);
-
-  const currentStep = level.steps[stepIndex];
-  const totalSteps = level.steps.length;
   const { digits } = level;
 
-  useEffect(() => {
-    if (inputRef.current) inputRef.current.focus();
-  }, [stepIndex]);
+  // rungOrder: indices into level.steps for rungs 1–5 (shuffled, reorderable)
+  const [rungOrder, setRungOrder] = useState(() => shuffleArray([0, 1, 2, 3, 4]));
+  // answers[0..4] for the 5 main rungs (in display order), null if not answered
+  const [mainAnswers, setMainAnswers] = useState(Array(5).fill(null));
+  // bonus answers: [0] = rung 0 (top), [1] = rung 6 (bottom)
+  const [bonusTopAnswer, setBonusTopAnswer] = useState(null);
+  const [bonusBottomAnswer, setBonusBottomAnswer] = useState(null);
 
+  // Dynamic bonus assignment: which level bonus goes where
+  // Determined when bonus unlocks based on user's ordering direction
+  // { top: level.bonusTop|bonusBottom, bottom: level.bonusTop|bonusBottom }
+  const bonusAssignment = useMemo(() => {
+    if (!mainAnswers.every((a) => a !== null)) return { top: level.bonusTop, bottom: level.bonusBottom };
+    const firstAnswer = mainAnswers[0];
+    const lastAnswer = mainAnswers[4];
+    // If user ordered ascending (top < bottom) → bonusTop goes top, bonusBottom goes bottom
+    // If descending (top > bottom) → swap: bonusBottom goes top, bonusTop goes bottom
+    if (firstAnswer <= lastAnswer) {
+      return { top: level.bonusTop, bottom: level.bonusBottom };
+    } else {
+      return { top: level.bonusBottom, bottom: level.bonusTop };
+    }
+  }, [mainAnswers, level.bonusTop, level.bonusBottom]);
+
+  // Which rung is selected: -1 = none, 0–4 = main, 5 = bonusTop, 6 = bonusBottom
+  const [selectedRung, setSelectedRung] = useState(-1);
+  const [inputValue, setInputValue] = useState('');
+  const [status, setStatus] = useState('idle'); // 'idle' | 'correct' | 'wrong'
+  const [showHint, setShowHint] = useState(false);
+  const [timer, setTimer] = useState(0);
+  const [finished, setFinished] = useState(false);
+
+  // Drag state
+  const [dragIdx, setDragIdx] = useState(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
+
+  // phase: 'main' | 'bonus' | 'finished'
+  const mainAllFilled = mainAnswers.every((a) => a !== null);
+
+  // Build the full 7-answer array for chain validation
+  const fullAnswers = useMemo(() => {
+    return [bonusTopAnswer, ...mainAnswers, bonusBottomAnswer];
+  }, [bonusTopAnswer, mainAnswers, bonusBottomAnswer]);
+
+  // Check if main 5 form a valid chain among themselves
+  const mainChainValid = useMemo(() => {
+    if (!mainAllFilled) return false;
+    for (let i = 0; i < mainAnswers.length - 1; i++) {
+      if (countDiffDigits(mainAnswers[i], mainAnswers[i + 1], digits) !== 1) return false;
+    }
+    return true;
+  }, [mainAnswers, mainAllFilled, digits]);
+
+  const mainAllUnique = useMemo(() => allUnique(mainAnswers), [mainAnswers]);
+
+  const bonusUnlocked = mainAllFilled && mainChainValid && mainAllUnique;
+  const allDone = bonusUnlocked && bonusTopAnswer !== null && bonusBottomAnswer !== null;
+
+  // Check full chain for completion
+  const fullChainValid = useMemo(() => {
+    if (!allDone) return false;
+    return isValidChain(fullAnswers, digits) && allUnique(fullAnswers);
+  }, [allDone, fullAnswers, digits]);
+
+  // Timer
+  useEffect(() => {
+    if (finished) return;
+    const id = setInterval(() => setTimer((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [finished]);
+
+  const timerStr = useMemo(() => {
+    const m = Math.floor(timer / 60);
+    const s = timer % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }, [timer]);
+
+  // Clear status after delay
   useEffect(() => {
     if (status !== 'idle') {
-      const t = setTimeout(() => setStatus('idle'), status === 'correct' ? 600 : 1100);
+      const t = setTimeout(() => setStatus('idle'), status === 'correct' ? 500 : 900);
       return () => clearTimeout(t);
     }
   }, [status]);
 
-  function handleSubmit(e) {
-    e.preventDefault();
-    const parsed = parseInt(inputValue, 10);
-
-    if (isNaN(parsed)) {
-      setStatus('wrong');
-      return;
+  // Check for game completion
+  useEffect(() => {
+    if (fullChainValid && !finished) {
+      setFinished(true);
+      setSelectedRung(-1);
     }
+  }, [fullChainValid, finished]);
 
-    if (parsed !== currentStep.answer) {
-      setStatus('wrong');
-      return;
+  // Get the question for the selected rung
+  function getSelectedQuestion() {
+    if (selectedRung >= 0 && selectedRung <= 4) {
+      return level.steps[rungOrder[selectedRung]];
     }
+    if (selectedRung === 5) return bonusAssignment.top;
+    if (selectedRung === 6) return bonusAssignment.bottom;
+    return null;
+  }
 
-    const newAnswers = [...answers, currentStep.answer];
-    setAnswers(newAnswers);
-    setStatus('correct');
-    setShowHint(false);
-    setInputValue('');
+  const currentQuestion = getSelectedQuestion();
 
-    if (stepIndex + 1 >= totalSteps) {
-      setTimeout(() => setFinished(true), 600);
+  // Handle rung click
+  function handleRungClick(rungDisplayIndex) {
+    // rungDisplayIndex: 0 = bonusTop, 1–5 = main (0-based: subtract 1), 6 = bonusBottom
+    if (finished) return;
+
+    if (rungDisplayIndex === 0) {
+      // bonus top
+      if (!bonusUnlocked) return;
+      if (bonusTopAnswer !== null) return; // already answered
+      setSelectedRung(5);
+      setInputValue('');
+      setShowHint(false);
+    } else if (rungDisplayIndex === 6) {
+      // bonus bottom
+      if (!bonusUnlocked) return;
+      if (bonusBottomAnswer !== null) return;
+      setSelectedRung(6);
+      setInputValue('');
+      setShowHint(false);
     } else {
-      setTimeout(() => setStepIndex((i) => i + 1), 600);
+      const mainIdx = rungDisplayIndex - 1; // 0–4
+      if (mainAnswers[mainIdx] !== null) return; // already answered
+      setSelectedRung(mainIdx);
+      setInputValue('');
+      setShowHint(false);
     }
   }
 
-  function handleInput(e) {
-    const val = e.target.value.replace(/[^0-9]/g, '');
-    if (val.length <= digits) setInputValue(val);
+  // Numpad press
+  function handleNumpadPress(digit) {
+    if (finished || selectedRung === -1 || !currentQuestion) return;
+    if (inputValue.length >= digits) return;
+
+    const newValue = inputValue + digit;
+    setInputValue(newValue);
+
+    // Auto-check when all digits filled
+    if (newValue.length === digits) {
+      const parsed = parseInt(newValue, 10);
+      if (parsed === currentQuestion.answer) {
+        // Correct!
+        setStatus('correct');
+        setShowHint(false);
+
+        if (selectedRung >= 0 && selectedRung <= 4) {
+          const newAnswers = [...mainAnswers];
+          newAnswers[selectedRung] = parsed;
+          setMainAnswers(newAnswers);
+        } else if (selectedRung === 5) {
+          setBonusTopAnswer(parsed);
+        } else if (selectedRung === 6) {
+          setBonusBottomAnswer(parsed);
+        }
+
+        // Auto-advance to next unanswered rung
+        setTimeout(() => {
+          if (selectedRung >= 0 && selectedRung <= 4) {
+            const newAnswers = [...mainAnswers];
+            newAnswers[selectedRung] = parsed;
+            // Find next unanswered main rung
+            const nextMain = newAnswers.findIndex((a) => a === null);
+            if (nextMain !== -1) {
+              setSelectedRung(nextMain);
+              setInputValue('');
+            } else {
+              setSelectedRung(-1);
+              setInputValue('');
+            }
+          } else {
+            // Bonus answered, check if other bonus needs answering
+            if (selectedRung === 5 && bonusBottomAnswer === null) {
+              setSelectedRung(6);
+              setInputValue('');
+            } else if (selectedRung === 6 && bonusTopAnswer === null) {
+              setSelectedRung(5);
+              setInputValue('');
+            } else {
+              setSelectedRung(-1);
+              setInputValue('');
+            }
+          }
+        }, 500);
+      } else {
+        // Wrong
+        setStatus('wrong');
+        setTimeout(() => {
+          setInputValue('');
+        }, 600);
+      }
+    }
+  }
+
+  function handleBackspace() {
+    setInputValue((v) => v.slice(0, -1));
+  }
+
+  // Drag-reorder handlers for main rungs
+  function handleDragStart(mainIdx) {
+    setDragIdx(mainIdx);
+  }
+
+  function handleDragOver(e, mainIdx) {
+    e.preventDefault();
+    if (dragIdx !== null && dragIdx !== mainIdx) {
+      setDragOverIdx(mainIdx);
+    }
+  }
+
+  function handleDrop(mainIdx) {
+    if (dragIdx === null || dragIdx === mainIdx) {
+      setDragIdx(null);
+      setDragOverIdx(null);
+      return;
+    }
+    // Swap
+    const newOrder = [...rungOrder];
+    const newAnswers = [...mainAnswers];
+    const tmpO = newOrder[dragIdx];
+    newOrder[dragIdx] = newOrder[mainIdx];
+    newOrder[mainIdx] = tmpO;
+    const tmpA = newAnswers[dragIdx];
+    newAnswers[dragIdx] = newAnswers[mainIdx];
+    newAnswers[mainIdx] = tmpA;
+    setRungOrder(newOrder);
+    setMainAnswers(newAnswers);
+    // Adjust selectedRung if needed
+    if (selectedRung === dragIdx) setSelectedRung(mainIdx);
+    else if (selectedRung === mainIdx) setSelectedRung(dragIdx);
+    setDragIdx(null);
+    setDragOverIdx(null);
+  }
+
+  function handleDragEnd() {
+    setDragIdx(null);
+    setDragOverIdx(null);
+  }
+
+  // Touch-based reorder
+  const touchStartRef = useRef(null);
+  const touchRungRef = useRef(null);
+
+  function handleTouchStart(e, mainIdx) {
+    touchStartRef.current = e.touches[0].clientY;
+    touchRungRef.current = mainIdx;
+  }
+
+  function handleTouchEnd(e, mainIdx) {
+    if (touchStartRef.current === null || touchRungRef.current === null) return;
+    const deltaY = e.changedTouches[0].clientY - touchStartRef.current;
+    const threshold = 30;
+    const fromIdx = touchRungRef.current;
+
+    if (Math.abs(deltaY) > threshold) {
+      const direction = deltaY > 0 ? 1 : -1;
+      const toIdx = fromIdx + direction;
+      if (toIdx >= 0 && toIdx < 5 && fromIdx !== toIdx) {
+        const newOrder = [...rungOrder];
+        const newAnswers = [...mainAnswers];
+        const tmpO = newOrder[fromIdx];
+        newOrder[fromIdx] = newOrder[toIdx];
+        newOrder[toIdx] = tmpO;
+        const tmpA = newAnswers[fromIdx];
+        newAnswers[fromIdx] = newAnswers[toIdx];
+        newAnswers[toIdx] = tmpA;
+        setRungOrder(newOrder);
+        setMainAnswers(newAnswers);
+        if (selectedRung === fromIdx) setSelectedRung(toIdx);
+        else if (selectedRung === toIdx) setSelectedRung(fromIdx);
+      }
+    }
+    touchStartRef.current = null;
+    touchRungRef.current = null;
   }
 
   function handleReset() {
-    setStepIndex(0);
+    setRungOrder(shuffleArray([0, 1, 2, 3, 4]));
+    setMainAnswers(Array(5).fill(null));
+    setBonusTopAnswer(null);
+    setBonusBottomAnswer(null);
+    setSelectedRung(-1);
     setInputValue('');
-    setAnswers([]);
     setStatus('idle');
     setShowHint(false);
+    setTimer(0);
     setFinished(false);
   }
+
+  // Error indicators for chain validation
+  const chainErrors = useMemo(() => {
+    const errors = Array(5).fill(false);
+    for (let i = 0; i < 4; i++) {
+      if (mainAnswers[i] !== null && mainAnswers[i + 1] !== null) {
+        if (countDiffDigits(mainAnswers[i], mainAnswers[i + 1], digits) !== 1) {
+          errors[i] = true;
+          errors[i + 1] = true;
+        }
+      }
+    }
+    return errors;
+  }, [mainAnswers, digits]);
 
   // Win screen
   if (finished) {
@@ -86,18 +368,12 @@ export default function GameBoard({ level, onComplete, onBack }) {
           <div className="gb-win__fireworks">🏆</div>
           <h2>Tebrikler!</h2>
           <p>
-            <strong>{level.title}</strong> bölümünü başarıyla tamamladın!
+            <strong>{level.title}</strong> bölümünü {timerStr} sürede tamamladın!
           </p>
-          <div className="gb-win__ladder">
-            <div className="gb-win__ladder-label">Sayı Merdivenin</div>
-            {answers.map((ans, i) => (
-              <div key={i} className="gb-win__rung">
-                <DigitDisplay
-                  value={ans}
-                  digits={digits}
-                  changedIdx={i > 0 ? diffDigitIndex(answers[i - 1], ans, digits) : null}
-                  accent={level.color}
-                />
+          <div className="gb-win__ladder-final">
+            {fullAnswers.map((ans, i) => (
+              <div key={i} className="gb-win__rung-row">
+                <DigitDisplay value={ans} digits={digits} accent={level.color} />
               </div>
             ))}
           </div>
@@ -114,169 +390,251 @@ export default function GameBoard({ level, onComplete, onBack }) {
     );
   }
 
-  const prevAnswer = answers.length > 0 ? answers[answers.length - 1] : null;
+  // Build display rungs: [bonusTop, main0, main1, main2, main3, main4, bonusBottom]
+  const displayRungs = [];
+
+  // Rung 0: bonus top
+  displayRungs.push({
+    type: 'bonus',
+    answer: bonusTopAnswer,
+    locked: !bonusUnlocked,
+    isSelected: selectedRung === 5,
+    displayIdx: 0,
+  });
+
+  // Rungs 1–5: main
+  for (let i = 0; i < 5; i++) {
+    displayRungs.push({
+      type: 'main',
+      mainIdx: i,
+      stepIdx: rungOrder[i],
+      answer: mainAnswers[i],
+      isSelected: selectedRung === i,
+      chainError: chainErrors[i],
+      displayIdx: i + 1,
+    });
+  }
+
+  // Rung 6: bonus bottom
+  displayRungs.push({
+    type: 'bonus',
+    answer: bonusBottomAnswer,
+    locked: !bonusUnlocked,
+    isSelected: selectedRung === 6,
+    displayIdx: 6,
+  });
 
   return (
     <div className="gb-container">
       {/* Header */}
       <header className="gb-header">
         <div className="gb-header__top">
-          <button className="btn btn--ghost gb-back" onClick={onBack}>
-            ← Geri
-          </button>
-          <div className="gb-header__title">
-            <span className="gb-header__level">{level.title}</span>
+          <button className="gb-header-btn" onClick={onBack}>←</button>
+          <div className="gb-header__center">
+            <span className="gb-timer">⏱ {timerStr}</span>
           </div>
-          <button className="btn btn--ghost gb-reset" onClick={handleReset} title="Yeniden başla">
-            ↺
-          </button>
-        </div>
-        <div className="gb-header__steps">
-          {level.steps.map((_, i) => (
-            <span
-              key={i}
-              className={`gb-dot ${
-                i < stepIndex ? 'gb-dot--done' : i === stepIndex ? 'gb-dot--active' : ''
-              }`}
-            />
-          ))}
-          <span className="gb-progress-text">
-            {stepIndex + 1}/{totalSteps}
-          </span>
+          <div className="gb-header__right">
+            <button
+              className="gb-header-btn"
+              onClick={() => setShowHint((v) => !v)}
+              title="İpucu"
+            >
+              İpucu
+            </button>
+            <button className="gb-header-btn gb-header-btn--icon" onClick={handleReset} title="Yeniden">
+              ⟳
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Completed ladder rungs */}
-      {answers.length > 0 && (
-        <div className="gb-ladder">
-          <div className="gb-ladder__rail" />
-          {answers.map((ans, i) => (
-            <div key={i} className="gb-ladder__rung">
-              <span className="gb-ladder__step">{i + 1}</span>
-              <DigitDisplay
-                value={ans}
-                digits={digits}
-                changedIdx={i > 0 ? diffDigitIndex(answers[i - 1], ans, digits) : null}
-                accent={level.color}
-                dim
-              />
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Ladder Section */}
+      <div className="gb-ladder">
+        {displayRungs.map((rung, i) => {
+          const isBonus = rung.type === 'bonus';
+          const isSolved = rung.answer !== null;
+          const isSelected = rung.isSelected;
+          const isLocked = isBonus && rung.locked;
+          const hasChainError = !isBonus && rung.chainError && isSolved;
 
-      {/* Question card */}
-      <div
-        className={`gb-card ${
-          status === 'correct'
-            ? 'gb-card--correct'
-            : status === 'wrong'
-            ? 'gb-card--wrong'
-            : ''
-        }`}
-      >
-        <div className="gb-card__step">Soru {stepIndex + 1}</div>
-        <p className="gb-card__question">{currentStep.question}</p>
+          // Is this the active input rung?
+          const isInputActive = isSelected && !isSolved;
 
-        {showHint && (
-          <div className="gb-card__hint">💡 {currentStep.hint}</div>
-        )}
-
-        <form className="gb-card__form" onSubmit={handleSubmit}>
-          {/* Digit preview boxes */}
-          <DigitInput
-            value={inputValue}
-            digits={digits}
-            prevAnswer={prevAnswer}
-            accent={level.color}
-            inputRef={inputRef}
-            onInput={handleInput}
-          />
-
-          <div className="gb-card__actions">
-            <button type="submit" className="btn btn--primary">
-              Onayla ↵
-            </button>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              onClick={() => setShowHint((v) => !v)}
-            >
-              {showHint ? 'İpucunu Gizle' : '💡 İpucu'}
-            </button>
-          </div>
-        </form>
-
-        {status === 'wrong' && (
-          <div className="gb-card__error">❌ Yanlış cevap, tekrar dene!</div>
-        )}
-      </div>
-
-      {/* Rule reminder */}
-      {prevAnswer !== null && (
-        <p className="gb-rule">
-          ↑ Önceki yanıttan yalnızca <strong>1 rakam</strong> farklı olmalı
-        </p>
-      )}
-    </div>
-  );
-}
-
-/** Digit input with visual boxes showing each digit as it's typed */
-function DigitInput({ value, digits, prevAnswer, accent, inputRef, onInput }) {
-  const prevStr = prevAnswer !== null ? String(prevAnswer).padStart(digits, '0') : null;
-  // Build an array of length `digits` — filled with typed chars or null
-  const cells = Array.from({ length: digits }, (_, i) =>
-    i < value.length ? value[i] : null
-  );
-
-  return (
-    <div className="digit-input-wrapper">
-      <div className="digit-input-boxes" onClick={() => inputRef.current?.focus()}>
-        {cells.map((d, i) => {
-          const filled = d !== null;
-          const changed = prevStr && filled && prevStr[i] !== d;
-          const same = prevStr && filled && prevStr[i] === d;
           return (
-            <span
+            <div
               key={i}
-              className={`digit-input-box ${filled ? 'digit-input-box--filled' : ''} ${
-                changed ? 'digit-input-box--changed' : ''
-              } ${same ? 'digit-input-box--same' : ''}`}
-              style={changed ? { '--cell-accent': accent } : {}}
+              className={`gb-rung ${isSelected ? 'gb-rung--selected' : ''} ${
+                isSolved ? 'gb-rung--solved' : ''
+              } ${isLocked ? 'gb-rung--locked' : ''} ${
+                hasChainError ? 'gb-rung--chain-error' : ''
+              } ${dragOverIdx !== null && !isBonus && rung.mainIdx === dragOverIdx ? 'gb-rung--drag-over' : ''}`}
+              onClick={() => handleRungClick(rung.displayIdx)}
             >
-              {filled ? d : <span className="digit-input-box__cursor" />}
-            </span>
+              {/* Connector */}
+              {i > 0 && <div className="gb-rung__connector" />}
+
+              <div className="gb-rung__row">
+                {/* Drag handle (= sign) for main rungs */}
+                {!isBonus ? (
+                  <div
+                    className="gb-rung__handle"
+                    draggable
+                    onDragStart={() => handleDragStart(rung.mainIdx)}
+                    onDragOver={(e) => handleDragOver(e, rung.mainIdx)}
+                    onDrop={() => handleDrop(rung.mainIdx)}
+                    onDragEnd={handleDragEnd}
+                    onTouchStart={(e) => handleTouchStart(e, rung.mainIdx)}
+                    onTouchEnd={(e) => handleTouchEnd(e, rung.mainIdx)}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    ☰
+                  </div>
+                ) : (
+                  <div className="gb-rung__handle-spacer" />
+                )}
+
+                {/* Rung content */}
+                <div className="gb-rung__content">
+                  {isLocked ? (
+                    <div className="gb-rung__locked-box">
+                      <span className="gb-rung__lock-icon">🔒</span>
+                    </div>
+                  ) : isInputActive ? (
+                    <DigitBoxesInput
+                      value={inputValue}
+                      digits={digits}
+                      accent={level.color}
+                      status={status}
+                    />
+                  ) : isSolved ? (
+                    <DigitDisplay value={rung.answer} digits={digits} accent={level.color} />
+                  ) : (
+                    <DigitBoxesEmpty digits={digits} />
+                  )}
+                </div>
+
+                {/* Right side = sign for main rungs */}
+                {!isBonus ? (
+                  <div className="gb-rung__eq">=</div>
+                ) : (
+                  <div className="gb-rung__eq-spacer" />
+                )}
+              </div>
+            </div>
           );
         })}
       </div>
-      <input
-        ref={inputRef}
-        className="gb-input-hidden"
-        type="text"
-        inputMode="numeric"
-        pattern="[0-9]*"
-        maxLength={digits}
-        value={value}
-        onChange={onInput}
-        autoComplete="off"
-        aria-label="Cevabı girin"
-      />
+
+      {/* Question Area */}
+      {currentQuestion && selectedRung !== -1 && (
+        <div className={`gb-question ${status === 'wrong' ? 'gb-question--wrong' : ''}`}>
+          <p className="gb-question__text">{currentQuestion.question}</p>
+          {showHint && currentQuestion.hint && (
+            <div className="gb-question__hint">💡 {currentQuestion.hint}</div>
+          )}
+          {status === 'wrong' && (
+            <div className="gb-question__error">Yanlış cevap, tekrar dene!</div>
+          )}
+        </div>
+      )}
+
+      {/* Status message when main phase done but chain invalid */}
+      {mainAllFilled && !mainChainValid && selectedRung === -1 && (
+        <div className="gb-status-msg gb-status-msg--warn">
+          ⚠ Sıralama hatalı! Her ardışık basamak yalnızca <strong>1 rakam</strong> farklı olmalı. Sürükleyerek sırayı değiştir.
+        </div>
+      )}
+
+      {/* Status message when bonus unlocked */}
+      {bonusUnlocked && (bonusTopAnswer === null || bonusBottomAnswer === null) && selectedRung === -1 && (
+        <div className="gb-status-msg gb-status-msg--info">
+          🔓 Bonus basamaklar açıldı! Üstteki veya alttaki kilit açılmış basamağa tıkla.
+        </div>
+      )}
+
+      {/* Numpad */}
+      <div className="gb-numpad">
+        <div className="gb-numpad__row">
+          {[1, 2, 3].map((n) => (
+            <button key={n} className="gb-numpad__key" onClick={() => handleNumpadPress(String(n))}>
+              {n}
+            </button>
+          ))}
+        </div>
+        <div className="gb-numpad__row">
+          {[4, 5, 6].map((n) => (
+            <button key={n} className="gb-numpad__key" onClick={() => handleNumpadPress(String(n))}>
+              {n}
+            </button>
+          ))}
+        </div>
+        <div className="gb-numpad__row">
+          {[7, 8, 9].map((n) => (
+            <button key={n} className="gb-numpad__key" onClick={() => handleNumpadPress(String(n))}>
+              {n}
+            </button>
+          ))}
+        </div>
+        <div className="gb-numpad__row">
+          <button className="gb-numpad__key gb-numpad__key--zero" onClick={() => handleNumpadPress('0')}>
+            0
+          </button>
+          <button className="gb-numpad__key gb-numpad__key--backspace" onClick={handleBackspace}>
+            ⌫
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
-/** Displays a number with each digit in a box; highlights changedIdx */
-function DigitDisplay({ value, digits, changedIdx, accent, dim }) {
+/** Empty digit placeholder boxes */
+function DigitBoxesEmpty({ digits }) {
+  return (
+    <div className="digit-boxes">
+      {Array.from({ length: digits }, (_, i) => (
+        <span key={i} className="digit-box digit-box--empty" />
+      ))}
+    </div>
+  );
+}
+
+/** Digit boxes for active input — highlights current position instead of blinking cursor */
+function DigitBoxesInput({ value, digits, accent, status }) {
+  const cells = Array.from({ length: digits }, (_, i) =>
+    i < value.length ? value[i] : null
+  );
+  const nextIdx = value.length < digits ? value.length : -1;
+
+  return (
+    <div className={`digit-boxes ${status === 'correct' ? 'digit-boxes--correct' : ''} ${status === 'wrong' ? 'digit-boxes--wrong' : ''}`}>
+      {cells.map((d, i) => {
+        const filled = d !== null;
+        const isNext = i === nextIdx;
+        return (
+          <span
+            key={i}
+            className={`digit-box ${filled ? 'digit-box--filled' : ''} ${isNext ? 'digit-box--highlight' : ''}`}
+            style={filled ? { '--cell-accent': accent } : isNext ? { '--cell-accent': accent } : {}}
+          >
+            {filled ? d : ''}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Displays a solved number with each digit in a box */
+function DigitDisplay({ value, digits, accent }) {
   const str = String(value).padStart(digits, '0');
   return (
-    <div className={`digit-display ${dim ? 'digit-display--dim' : ''}`}>
+    <div className="digit-display">
       {str.split('').map((d, i) => (
         <span
           key={i}
           className="digit-display__cell"
-          style={i === changedIdx ? { '--cell-accent': accent } : {}}
-          data-highlight={i === changedIdx}
+          style={{ '--cell-accent': accent }}
         >
           {d}
         </span>
